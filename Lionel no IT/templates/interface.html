@@ -714,12 +714,27 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mensagem: text })
             });
-            const data = await res.json();
+
+            let data = {};
+            try {
+                data = await res.json();
+            } catch {
+                data = {};
+            }
+
             document.getElementById('typing')?.remove();
 
+            const respostaSegura = (typeof data.resposta === 'string' && data.resposta.trim())
+                ? data.resposta
+                : (typeof data.erro === 'string' && data.erro.trim())
+                    ? `⚠️ ${data.erro}`
+                    : '⚠️ Não consegui entender a resposta do servidor.';
+
+            const sourceSegura = typeof data.source === 'string' ? data.source : null;
+
             const botTime = now();
-            renderMessage('bot', data.resposta, data.source, botTime);
-            currentMessages.push({ who: 'bot', text: data.resposta, source: data.source, time: botTime });
+            renderMessage('bot', respostaSegura, sourceSegura, botTime);
+            currentMessages.push({ who: 'bot', text: respostaSegura, source: sourceSegura, time: botTime });
 
             // Salva no histórico
             await saveCurrentSession(currentMessages);

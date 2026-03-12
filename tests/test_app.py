@@ -18,7 +18,10 @@ class ChatRouteTests(unittest.TestCase):
         response = self.client.post("/chat", json={"mensagem": "   "})
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()["erro"], "Informe uma mensagem válida.")
+        payload = response.get_json()
+        self.assertEqual(payload["erro"], "Informe uma mensagem válida.")
+        self.assertEqual(payload["resposta"], "Informe uma mensagem válida.")
+        self.assertEqual(payload["source"], "erro")
 
     def test_chat_handles_day_without_accent(self):
         response = self.client.post("/chat", json={"mensagem": "o que tem na terca?"})

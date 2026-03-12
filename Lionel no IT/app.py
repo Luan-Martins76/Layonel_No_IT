@@ -153,7 +153,8 @@ def chat():
     mensagem = data.get("mensagem", "")
 
     if not isinstance(mensagem, str) or not mensagem.strip():
-        return jsonify({"erro": "Informe uma mensagem válida."}), 400
+        erro = "Informe uma mensagem válida."
+        return jsonify({"source": "erro", "resposta": erro, "erro": erro}), 400
 
     mensagem = mensagem.strip().lower()
 

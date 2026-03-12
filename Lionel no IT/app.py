@@ -1,11 +1,14 @@
 from flask import Flask, render_template, request, jsonify
 import random
-import requests
+import unicodedata
+
 import markdown
+import requests
 
 app = Flask(__name__)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+REQUEST_TIMEOUT_SECONDS = 20
 
 usuario = {
     "nome": "Visitante",
@@ -16,7 +19,7 @@ contadores = {
     "else": 0,
     "dia": 0,
     "meu_nome": 0,
-    "calcuradora": 0
+    "calculadora": 0,
 }
 
 agenda = {
@@ -25,43 +28,54 @@ agenda = {
         "professor": "EDUARDO",
         "inicio": "19:00",
         "termino": "21:50",
-        "local": "BLOCO H, SALA 110"
+        "local": "BLOCO H, SALA 110",
     },
     "terça": {
         "materia": "FUNDAMENTOS MATEMÁTICOS PARA COMPUTAÇÃO",
         "professor": "Otoniel",
         "inicio": "19:00",
         "termino": "21:50",
-        "local": "BLOCO H, SALA 110"
+        "local": "BLOCO H, SALA 110",
     },
     "quarta": {
         "materia": "INTRODUÇÃO À ENGENHARIA DE SOLUÇÕES",
         "professor": "HENRIQUE LIMA",
         "inicio": "19:00",
         "termino": "22:40",
-        "local": "BLOCO H, SALA 110"
+        "local": "BLOCO H, SALA 110",
     },
     "quinta": {
         "materia": "CIDADANIA, ÉTICA E ESPIRITUALIDADE",
         "professor": "HELEHON SANTOS",
         "inicio": "19:00",
         "termino": "21:40",
-        "local": "BLOCO H, SALA 110"
+        "local": "BLOCO H, SALA 110",
     },
     "sexta": {
         "materia": "FUNDAMENTO DE COMPUTAÇÃO E INFRAESTRUTURA",
         "professor": "ARAÚJO",
         "inicio": "19:00",
         "termino": "21:40",
-        "local": "BLOCO H, SALA 110"
+        "local": "BLOCO H, SALA 110",
     },
     "sabado": {
         "materia": "LEITURA E INTERPRETAÇÃO DE TEXTO - ONLINE",
         "professor": "[NÃO TEM, AUTODIDATA MAN]",
         "inicio": "[QUANDO QUISER (SÓ NÃO INVENTA DE NÃO FAZER)]",
         "termino": "[NO SEU TEMPO IRMÃO]",
-        "local": "[SUA CASA]"
-    }
+        "local": "[SUA CASA]",
+    },
+}
+
+AGENDA_ALIASES = {
+    "segunda": "segunda",
+    "terca": "terça",
+    "terça": "terça",
+    "quarta": "quarta",
+    "quinta": "quinta",
+    "sexta": "sexta",
+    "sabado": "sabado",
+    "sábado": "sabado",
 }
 
 respostas = [
@@ -85,8 +99,13 @@ respostas = [
     "Se isso fosse um teste, você passou. Em que? Eu não sei.",
     "Não fui treinado para lidar com isso. Na verdade, não fui treinado para nada - sou um agente baseado em regras.",
     "Essa foi uma escolha de palavras.",
-    "Martins tá no primeiro período... Se acha que isso aqui responde essa interação ai? kkkkkkk"
+    "Martins tá no primeiro período... Se acha que isso aqui responde essa interação ai? kkkkkkk",
 ]
+
+
+def normalize_text(text):
+    normalized = unicodedata.normalize("NFD", text)
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
 
 
 def call_llm(model, prompt, temperature=0.3):
@@ -96,41 +115,61 @@ def call_llm(model, prompt, temperature=0.3):
             "model": model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": temperature}
-        }
+            "options": {"temperature": temperature},
+        },
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
-    return response.json()["response"]
+    response.raise_for_status()
+    payload = response.json()
+
+    llm_response = payload.get("response")
+    if not llm_response:
+        raise ValueError("Ollama retornou resposta vazia")
+
+    return llm_response
 
 
-@app.route('/')
+def resolve_day(mensagem):
+    normalized = normalize_text(mensagem)
+    for possible_day, canonical_day in AGENDA_ALIASES.items():
+        if possible_day in normalized:
+            return canonical_day
+    return None
+
+
+@app.route("/")
 def index():
-    return render_template('interface.html')
+    return render_template("interface.html")
 
 
-@app.route('/chat', methods=['POST'])
+@app.route("/health", methods=["GET"])
+def healthcheck():
+    return jsonify({"status": "ok"})
+
+
+@app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json()
-    mensagem = data.get('mensagem', '').strip().lower()  # ✅ chave correta e consistente
+    data = request.get_json(silent=True) or {}
+    mensagem = data.get("mensagem", "")
 
-    contadores['total'] += 1
+    if not isinstance(mensagem, str) or not mensagem.strip():
+        return jsonify({"erro": "Informe uma mensagem válida."}), 400
+
+    mensagem = mensagem.strip().lower()
+
+    contadores["total"] += 1
     resposta = ""
-    respondeu = False  #flag para saber se as regras já resolveram
+    respondeu = False
 
-    # --- REGRAS FIXAS (agenda, nome, etc.) ---
-
-    dia_encontrado = None
-    for dia in agenda:
-        if dia in mensagem:
-            dia_encontrado = dia
-            break
+    dia_encontrado = resolve_day(mensagem)
 
     if dia_encontrado:
         aula = agenda[dia_encontrado]
-        contadores['dia'] += 1
+        contadores["dia"] += 1
 
-        if contadores['dia'] == 4:
+        if contadores["dia"] == 4:
             resposta = "🥴 Tá bom, tá bom... VOCÊ venceu, parabéns? 🤨 Vou responder só o que o Martins falou para eu fazer 🤡"
-        elif contadores['dia'] == 3:
+        elif contadores["dia"] == 3:
             resposta = "É uma aula só que tu vai ter hoje seu maldito! Tá me perguntando os dias tudo porque? 🤨"
         else:
             resposta = (
@@ -138,23 +177,24 @@ def chat():
                 f"Começa às {aula['inicio']} e termina às {aula['termino']}. "
                 f"Local é {aula['local']} 📚"
             )
-        respondeu = True  # ✅ marca que já tem resposta
+        respondeu = True
 
     elif "criador" in mensagem:
         resposta = "Martins 😀. Olha o instagram do man: luan_henrique76l"
         respondeu = True
 
     elif "nome" in mensagem and ("seu" in mensagem or "qual" in mensagem):
-        contadores['meu_nome'] += 1
-        if contadores['meu_nome'] >= 4:
+        contadores["meu_nome"] += 1
+        if contadores["meu_nome"] >= 4:
             resposta = "Skynet 🤖"
-        elif contadores['meu_nome'] == 3:
+        elif contadores["meu_nome"] == 3:
             resposta = "Acho que eu escolhi outro... 😑"
         else:
             resposta = "Meu nome é Lionel No IT 😉"
         respondeu = True
 
     elif "calculadora" in mensagem:
+        contadores["calculadora"] += 1
         resposta = "Calculadora? Cara, tem uma no seu celular... Mas tudo bem, me manda os números e a operação (+, -, *, /) 🧮"
         respondeu = True
 
@@ -162,27 +202,20 @@ def chat():
         resposta = "Falou man 👋 Até mais!"
         respondeu = True
 
-    # Só vai pro LLM se nenhuma regra respondeu
     if not respondeu:
-        try:
-            resposta = call_llm("gemma3:4b", mensagem)
-            if resposta and len(resposta) > 5:
+        for model_name, source_name in (("gemma3:4b", "llm_small"), ("mistral-nemo:12b", "llm_big")):
+            try:
+                resposta = call_llm(model_name, mensagem)
                 resposta_html = markdown.markdown(resposta)
-                return jsonify({"source": "llm_small", "resposta": resposta_html})
-        except Exception:
-            pass  # gemma falhou, tenta o maior
+                return jsonify({"source": source_name, "resposta": resposta_html})
+            except Exception:
+                continue
 
-        try:
-            resposta = call_llm("mistral-nemo:12b", mensagem)
-            resposta_html = markdown.markdown(resposta)
-            return jsonify({"source": "llm_big", "resposta": resposta_html})
-        except Exception:
-            # Se até o LLM grande falhar, cai no random das respostas
-            resposta = random.choice(respostas)
-            return jsonify({"source": "fallback", "resposta": resposta})
+        resposta = random.choice(respostas)
+        return jsonify({"source": "fallback", "resposta": resposta})
 
     return jsonify({"source": "regras", "resposta": resposta})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
